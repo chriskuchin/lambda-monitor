@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -101,7 +102,7 @@ func main() {
 			&cli.IntFlag{
 				Name:        "prometheus-port",
 				Usage:       "Port to expose prometheus metrics on",
-				EnvVars:     []string{},
+				EnvVars:     []string{"EXPORTER_PORT"},
 				Aliases:     []string{"port"},
 				Value:       2112,
 				Destination: &prometheusPort,
@@ -109,7 +110,7 @@ func main() {
 			&cli.StringFlag{
 				Name:        "prometheus-path",
 				Usage:       "path to bind the prometeus endopoint to",
-				EnvVars:     []string{},
+				EnvVars:     []string{"EXPORTER_PATH"},
 				Aliases:     []string{"path"},
 				Value:       "/metrics",
 				Destination: &prometheusPath,
@@ -145,6 +146,16 @@ func main() {
 			}
 
 			http.Handle(prometheusPath, promhttp.Handler())
+			http.HandleFunc("/healthcheck", func(w http.ResponseWriter, r *http.Request) {
+				payload := map[string]string{
+					"status": "ok",
+				}
+
+				result, _ := json.Marshal(payload)
+
+				w.WriteHeader(http.StatusOK)
+				w.Write(result)
+			})
 			http.ListenAndServe(fmt.Sprintf(":%d", prometheusPort), nil)
 
 			return nil
