@@ -87,7 +87,7 @@ var (
 
 	InfoGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "lambda_monitor",
-		Subsystem: "runtime_info",
+		Subsystem: "runtime",
 		Name:      "info",
 		Help:      "Runtime info for the given function",
 	}, []string{"function", "runtime", "memory", "last_modified", "timeout", "revision", "version"})
@@ -125,8 +125,8 @@ func main() {
 			},
 			&cli.DurationFlag{
 				Name:        "interval",
-				Usage:       "",
-				EnvVars:     []string{},
+				Usage:       "The scrape Interval",
+				EnvVars:     []string{"SCRAPE_INTERVAL"},
 				Aliases:     []string{},
 				Value:       15 * time.Second,
 				Destination: &interval,
