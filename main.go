@@ -207,7 +207,10 @@ func processLambdaReports(functionName string, window time.Duration) error {
 	start := time.Now()
 	logGroup := fmt.Sprintf(LAMBDA_LOG_GROUP_PREFIX, functionName)
 
-	logsCommand := exec.Command("aws", "--region", awsRegion, "logs", "filter-log-events", "--log-group-name", logGroup, "--start-time", fmt.Sprint(getLogStartTimestamp(start, window)), "--end-time", fmt.Sprint(getLogEndTimestamp(start, window)), "--filter-pattern", LAMBDA_LOG_REPORT_FILTER)
+	logsCommand := exec.Command("aws", "--region", awsRegion, "logs", "filter-log-events",
+		"--log-group-name", logGroup, "--start-time", fmt.Sprint(getLogStartTimestamp(start, window)),
+		"--end-time", fmt.Sprint(getLogEndTimestamp(start, window)), "--filter-pattern", LAMBDA_LOG_REPORT_FILTER)
+
 	log.Debugf("[%s] cmd: %s", functionName, logsCommand.String())
 
 	output, err := logsCommand.CombinedOutput()
