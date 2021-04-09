@@ -151,8 +151,8 @@ func main() {
 			functions := getFunctions()
 
 			for _, fnc := range functions {
-				InfoGauge.WithLabelValues(*fnc.FunctionName, fmt.Sprint(fnc.Runtime), fmt.Sprint(fnc.MemorySize),
-					*fnc.LastModified, fmt.Sprint(fnc.Timeout), *fnc.RevisionId, *fnc.Version).Set(1)
+				InfoGauge.WithLabelValues(*fnc.FunctionName, *fnc.Runtime, fmt.Sprint(*fnc.MemorySize),
+					*fnc.LastModified, fmt.Sprint(*fnc.Timeout), *fnc.RevisionId, *fnc.Version).Set(1)
 
 				if !monitorFunctions[*fnc.FunctionName] {
 					go tailLambdaReports(*fnc.FunctionName)
