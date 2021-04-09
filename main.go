@@ -197,7 +197,9 @@ func tailLambdaReports(functionName string) {
 		err := processLambdaReports(functionName, interval)
 		if err != nil {
 			log.Error(err)
-			return
+			if strings.Contains(err.Error(), "ResourceNotFound") {
+				return
+			}
 		}
 		time.Sleep(time.Now().Truncate(interval).Add(interval).Sub(time.Now()))
 	}
