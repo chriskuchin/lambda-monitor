@@ -142,7 +142,7 @@ func main() {
 				Usage:       "The scrape Interval",
 				EnvVars:     []string{"SCRAPE_INTERVAL"},
 				Aliases:     []string{},
-				Value:       30 * time.Second,
+				Value:       1 * time.Minute,
 				Destination: &interval,
 			},
 		},
