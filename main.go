@@ -5,21 +5,33 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
 	"github.com/urfave/cli/v2"
+)
+
+type (
+	CLIResult struct {
+		Events []LogEvent
+	}
+	LogEvent struct {
+		LogStreamName      string
+		Timestamp          int64
+		Message            string
+		IngestionTimestamp int64
+		ID                 string
+	}
 )
 
 const (
@@ -33,6 +45,8 @@ var (
 	prometheusPath string
 	awsRegion      string
 	interval       time.Duration
+
+	cfg *session.Session
 
 	kvRegex = regexp.MustCompile("(.+): (.+) (.+)")
 	IDRegex = regexp.MustCompile("(.+): (.+)")
@@ -128,20 +142,21 @@ func main() {
 				Usage:       "The scrape Interval",
 				EnvVars:     []string{"SCRAPE_INTERVAL"},
 				Aliases:     []string{},
-				Value:       15 * time.Second,
+				Value:       30 * time.Second,
 				Destination: &interval,
 			},
 		},
 		Action: func(c *cli.Context) error {
+			cfg = session.New(aws.NewConfig().WithRegion(awsRegion))
 			functions := getFunctions()
 
-			for _, function := range functions {
-				InfoGauge.WithLabelValues(*function.FunctionName, *function.Runtime, fmt.Sprint(*function.MemorySize),
-					*function.LastModified, fmt.Sprint(*function.Timeout), *function.RevisionId, *function.Version).Set(1)
+			for _, fnc := range functions {
+				InfoGauge.WithLabelValues(*fnc.FunctionName, fmt.Sprint(fnc.Runtime), fmt.Sprint(fnc.MemorySize),
+					*fnc.LastModified, fmt.Sprint(fnc.Timeout), *fnc.RevisionId, *fnc.Version).Set(1)
 
-				if !monitorFunctions[*function.FunctionName] {
-					go processLambdaReports(*function.FunctionName)
-					monitorFunctions[*function.FunctionName] = true
+				if !monitorFunctions[*fnc.FunctionName] {
+					go tailLambdaReports(*fnc.FunctionName)
+					monitorFunctions[*fnc.FunctionName] = true
 				}
 			}
 
@@ -166,78 +181,65 @@ func main() {
 }
 
 func getFunctions() []*lambda.FunctionConfiguration {
-	svc := lambda.New(session.New(aws.NewConfig().WithRegion(awsRegion)))
+	svc := lambda.New(cfg)
 	input := &lambda.ListFunctionsInput{}
 
 	result, err := svc.ListFunctions(input)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case lambda.ErrCodeServiceException:
-				fmt.Println(lambda.ErrCodeServiceException, aerr.Error())
-			case lambda.ErrCodeTooManyRequestsException:
-				fmt.Println(lambda.ErrCodeTooManyRequestsException, aerr.Error())
-			case lambda.ErrCodeInvalidParameterValueException:
-				fmt.Println(lambda.ErrCodeInvalidParameterValueException, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			fmt.Println(err.Error())
-		}
-		return nil
+		log.Fatalf("%+v", err)
 	}
 
 	return result.Functions
 }
 
-func processLambdaReports(functionName string) {
+func tailLambdaReports(functionName string) {
 	for {
-		start := time.Now()
-		startTime := start.Truncate(interval).Add(-interval)
-
-		logs := cloudwatchlogs.New(session.New(aws.NewConfig().WithRegion(awsRegion)))
-		logGroup := fmt.Sprintf(LAMBDA_LOG_GROUP_PREFIX, functionName)
-		logsInput := &cloudwatchlogs.FilterLogEventsInput{
-			LogGroupName:  aws.String(logGroup),
-			FilterPattern: aws.String(LAMBDA_LOG_REPORT_FILTER),
-			StartTime:     aws.Int64(startTime.Unix()),
-		}
-
-		events, err := logs.FilterLogEvents(logsInput)
+		err := processLambdaReports(functionName, interval)
 		if err != nil {
-			if aerr, ok := err.(awserr.Error); ok {
-				switch aerr.Code() {
-				case cloudwatchlogs.ErrCodeResourceNotFoundException:
-					return
-				default:
-					log.Errorf("[%s] %+v", functionName, err.Error())
-				}
-			}
+			log.Error(err)
 			return
-		} else {
-			for _, line := range events.Events {
-				kv := strings.Split(strings.TrimPrefix(*line.Message, LAMBDA_LOG_REPORT_PREFIX), "\t")
-
-				for _, value := range kv {
-					if strings.TrimSpace(value) != "" {
-						lambdaInfo := kvRegex.FindStringSubmatch(value)
-
-						if len(lambdaInfo) == 4 {
-							handleReportMetric(functionName, lambdaInfo[1], lambdaInfo[2])
-						} else {
-							requestIDParsed := IDRegex.FindStringSubmatch(value)
-							log.Debugf("[%s] %s = %s", functionName, requestIDParsed[1], requestIDParsed[2])
-						}
-					}
-				}
-			}
 		}
-
 		time.Sleep(time.Now().Truncate(interval).Add(interval).Sub(time.Now()))
 	}
+}
+
+func processLambdaReports(functionName string, window time.Duration) error {
+	start := time.Now()
+	logGroup := fmt.Sprintf(LAMBDA_LOG_GROUP_PREFIX, functionName)
+
+	logsCommand := exec.Command("aws", "logs", "filter-log-events", "--log-group-name", logGroup, "--start-time", fmt.Sprint(getLogStartTimestamp(start, window)), "--end-time", fmt.Sprint(getLogEndTimestamp(start, window)), "--filter-pattern", LAMBDA_LOG_REPORT_FILTER)
+	log.Debugf("[%s] cmd: %s", functionName, logsCommand.String())
+
+	output, err := logsCommand.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("[%s] Failed to execute CLI command: %+v - %s", functionName, err, logsCommand.String())
+	}
+
+	var result CLIResult
+	err = json.Unmarshal(output, &result)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to parse command result: %+v", functionName, err)
+	}
+
+	for _, line := range result.Events {
+		kv := strings.Split(strings.TrimPrefix(line.Message, LAMBDA_LOG_REPORT_PREFIX), "\t")
+
+		for _, value := range kv {
+			if strings.TrimSpace(value) != "" {
+				lambdaInfo := kvRegex.FindStringSubmatch(value)
+
+				if len(lambdaInfo) == 4 {
+					handleReportMetric(functionName, lambdaInfo[1], lambdaInfo[2])
+				} else {
+					requestIDParsed := IDRegex.FindStringSubmatch(value)
+					log.Debugf("[%s] %s = %s", functionName, requestIDParsed[1], requestIDParsed[2])
+				}
+			}
+		}
+	}
+
+	log.Infof("[%s] Collection Cycle Duration: %v Processed: %d events", functionName, time.Now().Sub(start), len(result.Events))
+	return nil
 }
 
 func handleReportMetric(function, key, value string) {
@@ -262,4 +264,12 @@ func handleReportMetric(function, key, value string) {
 	default:
 		log.Warnf("[%s] Unhandled metric key: %s", function, key)
 	}
+}
+
+func getLogStartTimestamp(now time.Time, window time.Duration) int64 {
+	return now.Truncate(window).Add(-window).UTC().UnixNano() / int64(time.Millisecond)
+}
+
+func getLogEndTimestamp(now time.Time, window time.Duration) int64 {
+	return now.Truncate(window).UTC().UnixNano() / int64(time.Millisecond)
 }

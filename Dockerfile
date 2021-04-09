@@ -12,10 +12,11 @@ FROM alpine:3.12
 LABEL MAINTAINER Chris Kuchin <aphill70@gmail.com>
 
 # Following commands are for installing CA certs (for proper functioning of HTTPS and other TLS)
-RUN apk --update add ca-certificates && \
+RUN apk --update add ca-certificates python3 py3-pip && \
+  pip3 install --upgrade pip && \
+  pip3 install awscli && \
   rm -rf /var/cache/apk/*
 
-# Add new user 'appuser'
 RUN adduser -D appuser
 USER appuser
 
