@@ -212,7 +212,7 @@ func processLambdaReports(functionName string, window time.Duration) error {
 
 	output, err := logsCommand.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("[%s] Failed to execute CLI command: %+v - %s", functionName, err, logsCommand.String())
+		return fmt.Errorf("[%s] Failed to execute CLI command: %+v - %s\n%s", functionName, err, logsCommand.String(), output)
 	}
 
 	var result CLIResult
