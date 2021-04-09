@@ -196,8 +196,8 @@ func tailLambdaReports(functionName string) {
 	for {
 		err := processLambdaReports(functionName, interval)
 		if err != nil {
-			log.Error(err)
 			if strings.Contains(err.Error(), "ResourceNotFoundException") {
+				log.Errorf("[%s] No log group found: %+v", functionName, err)
 				return
 			}
 		}
@@ -217,13 +217,13 @@ func processLambdaReports(functionName string, window time.Duration) error {
 
 	output, err := logsCommand.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("[%s] Failed to execute CLI command: %+v - %s\n%s", functionName, err, logsCommand.String(), output)
+		return fmt.Errorf("Failed to execute CLI command: %+v - %s\n%s", err, logsCommand.String(), output)
 	}
 
 	var result CLIResult
 	err = json.Unmarshal(output, &result)
 	if err != nil {
-		return fmt.Errorf("[%s] failed to parse command result: %+v", functionName, err)
+		return fmt.Errorf("Failed to parse command result: %+v", err)
 	}
 
 	for _, line := range result.Events {
