@@ -197,7 +197,7 @@ func tailLambdaReports(functionName string) {
 		err := processLambdaReports(functionName, interval)
 		if err != nil {
 			log.Error(err)
-			if strings.Contains(err.Error(), "ResourceNotFound") {
+			if strings.Contains(err.Error(), "ResourceNotFoundException") {
 				return
 			}
 		}
